@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import numpy as np
+
 _package_directory = Path(__file__).resolve().parent
 
 rcparams = Path(_package_directory, 'anc', 'rcparams.mplstyle')
@@ -9,14 +11,22 @@ color_dict = {'red': '#D62728', 'orange': '#FF7F0E', 'yellow': '#FDB813',
               'cyan': '#17BECF', 'magenta': '#D64ECF', 'brown': '#8C564B',
               'darkgrey': '#3F3F3F', 'grey': '#7F7F7F', 'lightgrey': '#BFBFBF'}
 
-parent_species = ['O', 'O2', 'H2O', 'CO2']
+parent_species = np.array(['O', 'O2', 'H2O', 'CO2'])
 
-wavelengths = [121.6, 130.4, 135.6, 297.2, 486.1, 557.7, 630.0, 636.4, 656.3,
-               777.4, 844.6]
+wavelengths = np.array([121.6, 130.4, 135.6, 297.2, 486.1, 557.7,
+                        630.0, 636.4, 656.3, 777.4, 844.6])
 
-emissions = ['121.6 nm H I', '130.4 nm O I', '135.6 nm O I', '297.2 nm [O I]',
-             '486.1 nm H I', '557.7 nm [O I]', '630.0 nm [O I]',
-             '636.4 nm [O I]', '656.3 nm H I', '777.4 nm O I', '844.6 nm O I']
+emissions = np.array(['121.6 nm H I',
+                      '130.4 nm O I',
+                      '135.6 nm O I',
+                      '297.2 nm [O I]',
+                      '486.1 nm H I',
+                      '557.7 nm [O I]',
+                      '630.0 nm [O I]',
+                      '636.4 nm [O I]',
+                      '656.3 nm H I',
+                      '777.4 nm O I',
+                      '844.6 nm O I'])
 
 
 def get_available_transitions():

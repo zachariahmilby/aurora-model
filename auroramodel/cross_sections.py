@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import astropy.constants as c
@@ -28,6 +29,10 @@ class ElectronEnergyDistribution:
         if ratios is None:
             ratios = [1.0]
         self._n_e = n_e
+        try:
+            iter(peak_energies)
+        except TypeError:
+            peak_energies = [peak_energies]
         self._peak_energies = peak_energies
         self._scale_height = scale_height
         self._ratios = ratios
@@ -43,10 +48,12 @@ class ElectronEnergyDistribution:
         """
         distribution = np.zeros(
             self._electron_energies.shape) * 1 / (u.eV * u.g) ** (1/2)
-        for peak_energy, ratio in zip(self._peak_energies, self._ratios):
-            coeff = 4 / np.sqrt(2 * np.pi * c.m_e.to(u.g) * peak_energy**3)
-            exp = np.exp((self._electron_energies/peak_energy))
-            distribution += ratio * coeff / exp * self._electron_energies
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', category=RuntimeWarning)
+            for peak_energy, ratio in zip(self._peak_energies, self._ratios):
+                coeff = 4 / np.sqrt(2 * np.pi * c.m_e.to(u.g) * peak_energy**3)
+                exp = np.exp((self._electron_energies/peak_energy))
+                distribution += ratio * coeff / exp * self._electron_energies
         return distribution
 
     def _calculate_differential(self) -> u.Quantity:
@@ -88,6 +95,10 @@ class ElectronEnergyDistribution:
         The scaled electron density.
         """
         return self._n_e * np.exp(-np.abs(z.si/self._scale_height.si))
+
+    @property
+    def eV(self) -> u.Quantity:  # noqa
+        return self._peak_energies
 
 
 class CrossSection:

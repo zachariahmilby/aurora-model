@@ -163,23 +163,42 @@ class EmissionModel:
     """
     Model target auroral emission.
     """
-    def __init__(self, target: str, observations: [Observation] = None,
+    def __init__(self,
+                 electron_energy_dist: str or ElectronEnergyDistribution,
+                 observations: [Observation] = None,
                  parent_species: [str] = default_parent_species,
-                 scale_electron_density: bool = True):
+                 scale_electron_density: bool = False):
         """
         Parameters
         ----------
-        target
-        observations
-        parent_species
+        electron_energy_dist : str or ElectronEnergyDistribution
+            Target satellite ('Io', 'Europa', 'Ganymede' or 'Callisto').
+            Setting this parameter as a string for the target satellite
+            ('Io', 'Europa', 'Ganymede' or 'Callisto') will load a standard
+            electron distribution appropriate for that satellite.
+
+            Alternatively, you can specify an electron distribution generated
+            using the `ElectronEnergyDistribution` class available from the
+            `cross_sections` module.
+
+        observations : [Observation]
+            A list of emission observations for fitting. Optional, since you
+            can also just run the model in a theoretical context.
+        parent_species : [str]
+            A list of the parent species you want to evaluate (or fit). Options
+            currently available are O, O₂, H₂O, CO2 and S+.
         scale_electron_density : bool
             Whether or not to apply the scale-heights from Bagenal and Delamere
             (2011) to the electron densities.
         """
-        self._target = target
+        if isinstance(electron_energy_dist, str):
+            self._target = electron_energy_dist
+            self._electron_energy_distribution = \
+                electron_energy_distributions[self._target]
+        else:
+            self._target = None
+            self._electron_energy_distribution = electron_energy_dist
         self._observations = observations
-        self._electron_energy_distribution: ElectronEnergyDistribution = \
-            electron_energy_distributions[target]
         self._base_column_density = 1e14 / u.cm**2
         self._scale_electron_density = scale_electron_density
         if scale_electron_density:
@@ -191,7 +210,7 @@ class EmissionModel:
         self._n_emissions = len(wavelengths)
         self._parent_species = parent_species
 
-    def calculate_surface_brightness(
+    def _calculate_surface_brightness(
             self, column_density: u.Quantity, rate: u.Quantity) -> u.Quantity:
         """
         Calculate expected surface brightness for a given parent species column
@@ -212,7 +231,10 @@ class EmissionModel:
         conversion = 1 * u.ph / u.electron
         column_emission = (self._electron_energy_distribution.ne(z=self._z)
                            * column_density * rate * conversion)
-        return (column_emission / (4 * np.pi * u.sr)).to(u.R)
+        try:
+            return (column_emission / (4 * np.pi * u.sr)).to(u.R)
+        except u.core.UnitConversionError:
+            return (column_emission * u.electron / (4 * np.pi * u.sr)).to(u.R)
 
     # noinspection PyUnresolvedReferences
     def eval(self, species: [str],
@@ -227,13 +249,17 @@ class EmissionModel:
         column_densities : [u.Quantity]
             The column densities associated with each of the species.
         """
+        try:
+            iter(column_densities)
+        except TypeError:
+            column_densities = [column_densities]
         model = np.full((self._n_dim, self._n_emissions), fill_value=np.nan)
         for i, parent in enumerate(species):
             for j, wavelength in enumerate(wavelengths):
                 try:
                     xs = cross_sections[f'{parent}_{wavelength}nm']
                     rate = xs.get_rate(self._electron_energy_distribution)
-                    brightness = self.calculate_surface_brightness(
+                    brightness = self._calculate_surface_brightness(
                         column_density=column_densities[i], rate=rate)
                     model[i, j] = brightness.value
                 except KeyError:
@@ -483,6 +509,7 @@ class EmissionModel:
             [i.set_rotation(0) for i in axis.get_yticklabels()]
             [i.set_rotation(0) for i in axis.get_yticklabels(minor=True)]
         savename = Path(output_directory, f'{prefix}mcmc_fit_results.jpg')
+        fig.canvas.draw()
         plt.savefig(savename)
         plt.close(fig)
 
@@ -576,13 +603,17 @@ class EmissionModel:
             prefix = ''
         labels = [parent.replace('2', '₂') for parent in self._parent_species]
         _log(log, '\nModeling aurora emission...')
-        _log(log, f'   Target: {self._target}')
+        if self._target is not None:
+            _log(log, f'   Target: {self._target}')
+        else:
+            _log(log, f'   Electron energy distribution: '
+                      f'{self._electron_energy_distribution.eV}')
         if self._observations[0].time is not None:
             _log(log, f'   Time: {self._observations[0].time}')
         _log(log, f'   Atmospheric composition: {", ".join(labels)}')
         _log(log, f'   Distance from plasma sheet: {self._z.value} Rⱼ')
         rho = self._electron_energy_distribution.ne(z=self._z).value
-        _log(log, f'   Plasma density: {rho:.0f} e⁻/cm³')
+        _log(log, f'   Plasma density: {rho:#.2g} e⁻/cm³')
 
         # run the full MCMC
         if (iteration is not None) and (count is not None):
