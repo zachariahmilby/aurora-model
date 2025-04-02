@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 from astropy.time import Time
 from hiresaurora.general import FuzzyQuantity
-from lmfit.models import GaussianModel
 
 from auroramodel.cross_sections import cross_sections, \
     ElectronEnergyDistribution, electron_energy_distributions
@@ -28,9 +27,13 @@ class Observation:
     """
     Class to hold observed aurora brightness and uncertainties.
     """
-    def __init__(self, wavelength: float, brightness: u.Quantity,
-                 uncertainty: u.Quantity, z: u.Quantity = 0 * c.R_jup,
-                 time: str or Time = None):
+    def __init__(self,
+                 wavelength: float,
+                 brightness: u.Quantity,
+                 uncertainty: u.Quantity,
+                 z: u.Quantity = 0 * c.R_jup,
+                 time: str or Time = None,
+                 systematic_uncertainty: float = 0.0):
         """
         Parameters
         ----------
@@ -43,7 +46,8 @@ class Observation:
         """
         self._wavelength = wavelength
         self._brightness = brightness
-        self._uncertainty = uncertainty
+        self._uncertainty = np.sqrt(uncertainty**2 +
+                                    (systematic_uncertainty*brightness)**2)
         self._z = z
         if time is not None:
             try:
@@ -78,85 +82,15 @@ class Observation:
         return self._time
 
 
-class _BestFit:
+class ModelResult:
     """
-    Class to retrieve best-fit information from an MCMC chain.
+    Class to hold the results of an EmissionModel simulation.
     """
-    def __init__(self, chain: np.ndarray, base_column_density: u.Quantity):
-        self._chain = chain
-        self._gaussian_fit = self._fit_gaussian()
-        self._base_column_density = base_column_density
-        self._value, self._uncertainty = self._get_best_fit()
-        self._upper_limit = self._get_column_density_upper_limit()
+    def __init__(self):
+        pass
 
-    def __str__(self):
-        value = float(self._value)
-        uncertainty = float(self._uncertainty)
-        fuzz = FuzzyQuantity(value, uncertainty)
-        fuzz_ul = FuzzyQuantity(value + uncertainty, uncertainty)
-        return f'{fuzz.printable} (upper limit: {fuzz_ul.value_printable})'
 
-    def _fit_gaussian(self):
-        hist, edges = np.histogram(self._chain, bins=1000)
-        centers = edges[:-1] + np.diff(edges)
-        model = GaussianModel()
-        model.set_param_hint('center', min=0)
-        params = model.guess(hist, x=centers)
-        result = model.fit(hist, params=params, x=centers)
-        return result.params
 
-    def _get_column_density(self) -> float:
-        """
-        Return the median of the chain as the best-fit column density.
-        """
-        return self._gaussian_fit['center'].value * self._base_column_density
-
-    def _get_column_density_uncertainty(self) -> float:
-        """
-        Return the standard deviation of the chain as the uncertainty on the
-        best-fit column density.
-        """
-        return self._gaussian_fit['sigma'].value * self._base_column_density
-
-    def _get_best_fit(self) -> (float, float):
-        """
-        Return the best-fit and uncertainty with appropriate significant
-        figures.
-        """
-        value = self._get_column_density()
-        uncertainty = self._get_column_density_uncertainty()
-        fuzz = FuzzyQuantity(value, uncertainty)
-        return fuzz.value_formatted, fuzz.uncertainty_formatted
-
-    def _get_column_density_upper_limit(self) -> float:
-        """
-        Return the upper limit as the +1-sigma percentile, formatted to match
-        the significant figures of the uncertainty.
-        """
-        value = self._get_column_density()
-        uncertainty = self._get_column_density_uncertainty()
-        fuzz = FuzzyQuantity(value + uncertainty, uncertainty)
-        return float(fuzz.value_formatted)
-
-    @property
-    def value(self) -> float:
-        return float(self._value)
-
-    @property
-    def uncertainty(self) -> float:
-        return float(self._uncertainty)
-
-    @property
-    def upper_limit(self) -> float:
-        return self._upper_limit
-
-    @property
-    def base_column_density(self) -> u.Quantity:
-        return self._base_column_density
-
-    @property
-    def result(self) -> str:
-        return self.__str__()
 
 
 class EmissionModel:
@@ -228,16 +162,16 @@ class EmissionModel:
         -------
         The surface brightness in [R].
         """
-        conversion = 1 * u.ph / u.electron
         column_emission = (self._electron_energy_distribution.ne(z=self._z)
-                           * column_density * rate * conversion)
+                           * column_density * rate * u.ph / u.electron)
         try:
             return (column_emission / (4 * np.pi * u.sr)).to(u.R)
         except u.core.UnitConversionError:
             return (column_emission * u.electron / (4 * np.pi * u.sr)).to(u.R)
 
     # noinspection PyUnresolvedReferences
-    def eval(self, species: [str],
+    def eval(self,
+             species: [str],
              column_densities: [u.Quantity]) -> u.Quantity:
         """
         Evaluate the model for supplied column densities.
@@ -348,21 +282,6 @@ class EmissionModel:
                              progress_kwargs=progress_kwargs)
         return sampler
 
-    def _get_best_fit_atmosphere(self, chain: np.ndarray) -> [_BestFit]:
-        """
-        Take the output chain from the MCMC simulation and get the best-fit
-        atmosphere, uncertainties and upper limits.
-        """
-        best_fits = []
-        labels = [parent.replace('2', '₂') for parent in self._parent_species]
-        print('\nBest-fit atmosphere:')
-        for i in range(self._n_dim):
-            best_fit = _BestFit(chain=chain[:, i],
-                                base_column_density=self._base_column_density)
-            print(f'   {labels[i]}: {best_fit.result}')
-            best_fits.append(best_fit)
-        return best_fits
-
     def _save_best_fit_column_density(
             self, samples: np.ndarray, output_directory: str or Path,
             prefix: str) -> None:
@@ -370,27 +289,28 @@ class EmissionModel:
         Save the best-fit results in a CSV.
         """
         magnitude = self._base_column_density.value
-        quantiles = np.array(self._calculate_quantiles(samples)) * magnitude
+        quantiles = np.array(
+            self._calculate_quantiles(samples)) * magnitude
         sigma_lowers = []
         sigma_uppers = []
-        medians = []
+        max_likelihoods = []
         for quantile in quantiles:
             fuzz_lower = FuzzyQuantity(quantile[1], quantile[0])
             fuzz_upper = FuzzyQuantity(quantile[1], quantile[2])
             if (len(fuzz_lower.value_formatted)
                     > len(fuzz_upper.value_formatted)):
-                median = fuzz_lower.value_formatted
+                ml = fuzz_lower.value_formatted
             else:
-                median = fuzz_upper.value_formatted
+                ml = fuzz_upper.value_formatted
             ll = fuzz_lower.uncertainty_formatted
             ul = fuzz_upper.uncertainty_formatted
             sigma_lowers.append(ll)
             sigma_uppers.append(ul)
-            medians.append(median)
+            max_likelihoods.append(ml)
 
         data = {
             'species': self._parent_species,
-            'column_density_cm-2': medians,
+            'column_density_cm-2': max_likelihoods,
             'column_density_sigma_lower_cm-2': sigma_lowers,
             'column_density_sigma_upper_cm-2': sigma_uppers,
         }
@@ -438,18 +358,17 @@ class EmissionModel:
         calculated_quantiles = []
         for i in range(samples.shape[1]):
             bounds = np.percentile(samples[:, i], quantiles)
-            lower = bounds[1] - bounds[0]
-            upper = bounds[2] - bounds[1]
+            lower, upper = np.diff(bounds)
             fuzz_lower = FuzzyQuantity(bounds[1], lower)
             fuzz_upper = FuzzyQuantity(bounds[1], upper)
             if (len(fuzz_lower.value_formatted)
                     > len(fuzz_upper.value_formatted)):
-                median = float(fuzz_lower.value_formatted)
+                max_likelihood = float(fuzz_lower.value_formatted)
             else:
-                median = float(fuzz_upper.value_formatted)
+                max_likelihood = float(fuzz_upper.value_formatted)
             ll = float(fuzz_lower.uncertainty_formatted)
             ul = float(fuzz_upper.uncertainty_formatted)
-            calculated_quantiles.append([ll, median, ul])
+            calculated_quantiles.append([ll, max_likelihood, ul])
         return calculated_quantiles
 
     def _make_corner_plot_titles(self, samples: np.ndarray, labels: [str]):
@@ -458,22 +377,24 @@ class EmissionModel:
         magnitude = self._base_column_density.value
         for i in range(len(quantiles)):
             ll = quantiles[i][0] / magnitude
-            median = quantiles[i][1] / magnitude
+            ml = quantiles[i][1] / magnitude
             ul = quantiles[i][2] / magnitude
             label = labels[i].replace('$', '')
             title = fr'$\mathrm{{{label}}} = '
-            title += fr'\left({median}_{{-{ll}}}^{{+{ul}}}\right) '
+            title += fr'\left({ml}_{{-{ll}}}^{{+{ul}}}\right) '
             title += fr'\times 10^{{{np.log10(magnitude):.0f}}}'
             title += fr'\,\mathrm{{cm^{{-2}}}}$'
             titles.append(title)
         return titles
 
-    def _save_corner_plot(self, samples: np.ndarray, labels: [str],
-                          output_directory: str or Path, prefix: str):
+    def _save_corner_plot(self, samples: np.ndarray, prob: np.ndarray,
+                          labels: [str], output_directory: str or Path,
+                          prefix: str):
         """
         Save MCMC results corner plot.
         """
         samples *= self._base_column_density.value
+        truths = samples[prob.argmax()]
         labels = [label.replace('₂', r'$_2$') for label in labels]
         label_kwargs = dict(va='baseline', ha='center')
         titles = self._make_corner_plot_titles(samples=samples, labels=labels)
@@ -481,9 +402,9 @@ class EmissionModel:
                          clear=True, layout='constrained')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', category=UserWarning)
-            corner.corner(samples, labels=labels, label_kwargs=label_kwargs,
-                          fig=fig, use_math_text=True, axes_scale='log',
-                          quiet=True)
+            corner.corner(samples, truths=truths, truth_color='red',
+                          labels=labels, label_kwargs=label_kwargs, fig=fig,
+                          use_math_text=True, axes_scale='log', quiet=True)
         axes = np.reshape(fig.axes, (self._n_dim, self._n_dim))
         for i in range(self._n_dim):
             for j in range(self._n_dim):
@@ -520,8 +441,8 @@ class EmissionModel:
         Retrieve the maximum-likelihood model from the MCMC sampler and save it
         as a CSV.
         """
-        quantiles = np.array(
-            self._calculate_quantiles(samples)) * self._base_column_density
+        quantiles = np.array(self._calculate_quantiles(samples))
+        quantiles = quantiles * self._base_column_density
         model_lower = self.eval(species=self._parent_species,
                                 column_densities=quantiles[:, 0])
         model_median = self.eval(species=self._parent_species,
@@ -569,9 +490,14 @@ class EmissionModel:
                         file.write(f',{observed},{uncertainty}')
                 file.write(f',{lower:{fmt}},{median:{fmt}},{upper:{fmt}}\n')
 
-    def run(self, output_directory: str or Path, prefix: str = None,
-            nsteps: int = 5000, nwalkers: int = None, iteration: int = None,
-            count: int = None):
+    def run(self,
+            output_directory: str or Path,
+            prefix: str = None,
+            nsteps: int = 5000,
+            nwalkers: int = None,
+            iteration: int = None,
+            count: int = None,
+            silent: bool = False):
         """
         Run the aurora model MCMC fit for the specified atmospheric constituent
         species.
@@ -579,7 +505,12 @@ class EmissionModel:
         Parameters
         ----------
         output_directory : str or Path
-            The directory where you want the results saved.
+            The directory where you want the results saved. If none specified
+            and `save_outputs` is set to `True`, the results will be saved in
+            the current working directory.
+        save_outputs : bool
+            Set to `True` if you want output graphics and tables saved in the
+            `output_directory` specified above.
         prefix : str
             Add a file name here if you want it added to the beginning of the
             output file names.
@@ -597,23 +528,28 @@ class EmissionModel:
         """
         t0 = datetime.now(timezone.utc)
         log = []
+        if output_directory is None:
+            output_directory = Path('.')
         if prefix is not None:
             prefix = f'{prefix}_'
         else:
             prefix = ''
         labels = [parent.replace('2', '₂') for parent in self._parent_species]
-        _log(log, '\nModeling aurora emission...')
+        _log(log, '\nModeling aurora emission...', silent=silent)
         if self._target is not None:
-            _log(log, f'   Target: {self._target}')
+            _log(log, f'   Target: {self._target}', silent=silent)
         else:
             _log(log, f'   Electron energy distribution: '
-                      f'{self._electron_energy_distribution.eV}')
+                      f'{self._electron_energy_distribution.eV}',
+                 silent=silent)
         if self._observations[0].time is not None:
-            _log(log, f'   Time: {self._observations[0].time}')
-        _log(log, f'   Atmospheric composition: {", ".join(labels)}')
-        _log(log, f'   Distance from plasma sheet: {self._z.value} Rⱼ')
+            _log(log, f'   Time: {self._observations[0].time}', silent=silent)
+        _log(log, f'   Atmospheric composition: {", ".join(labels)}',
+             silent=silent)
+        _log(log, f'   Distance from plasma sheet: {self._z.value} Rⱼ',
+             silent=silent)
         rho = self._electron_energy_distribution.ne(z=self._z).value
-        _log(log, f'   Plasma density: {rho:#.2g} e⁻/cm³')
+        _log(log, f'   Plasma density: {rho:#.2g} e⁻/cm³', silent=silent)
 
         # run the full MCMC
         if (iteration is not None) and (count is not None):
@@ -621,6 +557,8 @@ class EmissionModel:
         else:
             desc = '   MCMC fit'
         progress_kwargs = dict(leave=False, desc=desc)
+        if silent:
+            progress_kwargs['disable'] = True
         sampler = self._run_mcmc(nsteps=nsteps, nwalkers=nwalkers,
                                  progress_kwargs=progress_kwargs)
 
@@ -633,24 +571,29 @@ class EmissionModel:
         thin = int(tau / 2)
         samples = sampler.get_chain(discard=discard, thin=thin,
                                     flat=True)
+        prob = sampler.get_log_prob(discard=discard, thin=thin,
+                                    flat=True)
 
         # calculate best fits and save results
-        _log(log, 'Saving best-fit column densities...')
+        _log(log, 'Saving best-fit column densities...', silent=silent)
         self._save_best_fit_column_density(
-            samples=samples, output_directory=output_directory, prefix=prefix)
-        _log(log, 'Saving maximum likelihood emission model...')
+            samples=samples, output_directory=output_directory,
+            prefix=prefix)
+        _log(log, 'Saving maximum likelihood emission model...',
+             silent=silent)
         self._save_best_fit_emission(
-            samples=samples, output_directory=output_directory, prefix=prefix)
-        _log(log, 'Saving autocorrelation plots...')
+            samples=samples, output_directory=output_directory,
+            prefix=prefix)
+        _log(log, 'Saving autocorrelation plots...', silent=silent)
         self._save_autocorrelation(
             sampler=sampler, discard=discard, labels=labels,
             output_directory=output_directory, prefix=prefix)
-        _log(log, 'Saving corner plot...')
-        self._save_corner_plot(
-            samples=samples, labels=labels, output_directory=output_directory,
-            prefix=prefix)
+        _log(log, 'Saving corner plot...', silent=silent)
+        self._save_corner_plot(samples=samples, prob=prob, labels=labels,
+                               output_directory=output_directory,
+                               prefix=prefix)
 
         # clear several lines from terminal output
         _log(log, f'Modeling complete, time elapsed '
-                  f'{datetime.now(timezone.utc) - t0}.')
+                  f'{datetime.now(timezone.utc) - t0}.', silent=silent)
         _write_log(Path(output_directory, f'{prefix}log.txt'), log)

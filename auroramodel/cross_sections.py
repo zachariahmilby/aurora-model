@@ -165,17 +165,17 @@ class CrossSection:
 electron_energy_distributions = {
     'Io': ElectronEnergyDistribution(
         n_e=3000*u.electron/u.cm**3, peak_energies=[5*u.eV],
-        scale_height=0.74*c.R_jup),
+        scale_height=0.77*c.R_jup),
     'Europa': ElectronEnergyDistribution(
         n_e=160*u.electron/u.cm**3, peak_energies=[20, 250]*u.eV,
         ratios=[0.95, 0.05],
-        scale_height=1.68*c.R_jup),
+        scale_height=1.70*c.R_jup),
     'Ganymede': ElectronEnergyDistribution(
         n_e=20*u.electron/u.cm**3, peak_energies=[100*u.eV],
-        scale_height=2.78*c.R_jup),
+        scale_height=2.83*c.R_jup),
     'Callisto': ElectronEnergyDistribution(
         n_e=0.15*u.electron/u.cm**3, peak_energies=[35*u.eV],
-        scale_height=3.66*c.R_jup)
+        scale_height=3.69*c.R_jup)
 }
 
 
