@@ -1,2 +1,2 @@
 include auroramodel/anc/*
-include auroramodel/cross_sections/*
+include auroramodel/anc/cross_sections/*

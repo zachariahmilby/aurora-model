@@ -6,7 +6,9 @@ class Transition:
     """
     Class to hold transition wavelength and probability information.
     """
-    def __init__(self, wavelength: u.Quantity, einstein_a: u.Quantity):
+    def __init__(self,
+                 wavelength: u.Quantity,
+                 einstein_a: u.Quantity):
         """
         Parameters
         ----------
@@ -32,7 +34,10 @@ class EnergyLevel:
     """
     Class to hold energy level information for a given atom.
     """
-    def __init__(self, atom: str, term: str, transitions: [Transition]):
+    def __init__(self,
+                 atom: str,
+                 term: str,
+                 transitions: [Transition]):
         """
         Parameters
         ----------
