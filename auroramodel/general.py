@@ -12,8 +12,8 @@ color_dict = {'red': '#D62728', 'orange': '#FF7F0E', 'yellow': '#FDB813',
               'cyan': '#17BECF', 'magenta': '#D64ECF', 'brown': '#8C564B',
               'darkgrey': '#3F3F3F', 'grey': '#7F7F7F', 'lightgrey': '#BFBFBF'}
 
-# parent species currently available in the model
-parent_species = np.array(['CO2', 'H2O', 'O2', 'O', 'SO2'])
+# atmospheric constituents currently available in the model
+available_constituents = np.array(['O', 'O2', 'H2O', 'CO2', 'SO2'])
 
 # wavelengths of the various transitions
 wavelengths = u.Quantity([121.6,
@@ -42,28 +42,9 @@ emissions = np.array(['121.6 nm H I',
                       '844.6 nm O I'])
 
 
-def get_available_transitions() -> None:
-    """
-    Print available atomic/molecular parent species and wavelengths in the
-    aurora model.
-    """
-    print('Available parent species and auroral emissions in model:')
-    path = Path(_package_directory, 'anc/cross_sections')
-    for species in parent_species:
-        files = sorted(path.glob(f'{species}_*.dat'))
-        xs = [s.name.split('_')[1].replace('nm.dat', ' nm') for s in files]
-        ems = []
-        for sec in xs:
-            for e in emissions:
-                if sec in e:
-                    ems.append(e)
-        print(f"   Parent species: {species.replace('2', '₂')}")
-        [print(f'      {emission}') for emission in ems]
-
-
-def calculate_surface_brightness(electron_density: u.Quantity,
-                                 column_density: u.Quantity,
-                                 rate: u.Quantity) -> u.Quantity:
+def _calculate_surface_brightness(electron_density: u.Quantity,
+                                  column_density: u.Quantity,
+                                  rate: u.Quantity) -> u.Quantity:
     """
     Calculate expected surface brightness for a given parent species column
     density and emission rate coefficient.
@@ -83,7 +64,7 @@ def calculate_surface_brightness(electron_density: u.Quantity,
     The surface brightness in [R].
     """
     column_emission = electron_density * column_density * rate
-    column_emission = column_emission * u.ph / u.electron
+    column_emission = column_emission
     try:
         brightness = (column_emission / (4 * np.pi * u.sr)).to(u.R)
     except u.core.UnitConversionError:

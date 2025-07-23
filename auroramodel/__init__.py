@@ -1,5 +1,5 @@
-from auroramodel.general import get_available_transitions, emissions, \
-    wavelengths, parent_species
-from auroramodel.emission_model import EmissionModel, save_rates
+from auroramodel.emission_model import EmissionModel, get_emission_rates
 from auroramodel.observations import Observation
-from auroramodel.electrons import ElectronProperties
+from auroramodel.cross_sections import CrossSection, get_all_cross_sections
+from auroramodel.electrons import (ElectronProperties,
+                                   get_canonical_electron_properties)
