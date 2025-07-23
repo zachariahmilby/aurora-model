@@ -343,15 +343,3 @@ def get_emission_rates(
     df = pd.DataFrame(rates, index=emissions)
     df.unit = unit
     return df
-
-
-if __name__ == '__main__':
-    obbys = [Observation(557.7*u.nm, 10*u.R, 2*u.R),
-             Observation(630.0*u.nm, 150*u.R, 10*u.R),
-             Observation(636.4*u.nm, 50*u.R, 5*u.R),
-             Observation(777.4*u.nm, 20*u.R, 5*u.R),
-             Observation(844.6*u.nm, 10*u.R, 5*u.R)]
-    moddy = EmissionModel()
-    compy = ['O', 'O2', 'H2O', 'CO2']
-    pd.set_option('display.float_format', '{:.4e}'.format)
-    moddy.fit(obbys, 'Ganymede', compy, emcee_output_path='/Users/zachariahmilby/Desktop')
